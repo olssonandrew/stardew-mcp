@@ -11,7 +11,6 @@ import os
 from pathlib import Path
 
 from fastmcp import FastMCP
-from pydantic import BaseModel, Field, ConfigDict, field_validator
 
 # ---------------------------------------------------------------------------
 # Server setup
@@ -96,35 +95,6 @@ FILE_REGISTRY: dict[str, str] = {
 }
 
 
-class FetchFileInput(BaseModel):
-    """Input model for fetching a Stardew Valley reference file."""
-
-    model_config = ConfigDict(
-        str_strip_whitespace=True,
-        validate_assignment=True,
-        extra="forbid",
-    )
-
-    file: str = Field(
-        ...,
-        description=(
-            "The reference file key to fetch. Call stardew_list_files first "
-            "to discover the available files and descriptions."
-        ),
-    )
-
-    @field_validator("file")
-    @classmethod
-    def validate_file(cls, value: str) -> str:
-        normalized = value.lower()
-        if normalized not in FILE_REGISTRY:
-            raise ValueError(
-                "Unknown reference file. Call stardew_list_files first to "
-                "discover valid file keys."
-            )
-        return normalized
-
-
 # ---------------------------------------------------------------------------
 # Tools
 # ---------------------------------------------------------------------------
@@ -173,7 +143,7 @@ async def stardew_list_files() -> str:
         "openWorldHint": False,
     },
 )
-async def stardew_fetch_file(params: FetchFileInput) -> str:
+async def stardew_fetch_file(file: str) -> str:
     """Fetch the full contents of a Stardew Valley reference file.
 
     Returns exact game data (item names, sell prices, gift preferences, grow
@@ -182,22 +152,27 @@ async def stardew_fetch_file(params: FetchFileInput) -> str:
     pass the chosen file key here.
 
     Args:
-        params (FetchFileInput):
-            - file (str): The exact reference file key.
-              Use stardew_list_files to see all valid keys.
+        file (str): The exact reference file key.
+            Use stardew_list_files to see all valid keys.
 
     Returns:
         str: Full markdown content of the requested reference file.
 
     """
-    path = REFERENCES_DIR / f"{params.file}.md"
+    file = file.strip().lower()
+    if file not in FILE_REGISTRY:
+        raise ValueError(
+            "Unknown reference file. Call stardew_list_files first to "
+            "discover valid file keys."
+        )
+    path = REFERENCES_DIR / f"{file}.md"
     if not path.is_file():
-        raise FileNotFoundError(f"Bundled reference file is missing: {params.file}.md")
+        raise FileNotFoundError(f"Bundled reference file is missing: {file}.md")
 
     try:
         return path.read_text(encoding="utf-8")
     except OSError as exc:
-        raise RuntimeError(f"Could not read '{params.file}.md': {exc}") from exc
+        raise RuntimeError(f"Could not read '{file}.md': {exc}") from exc
 
 
 # ---------------------------------------------------------------------------
