@@ -9,10 +9,9 @@ from bundled markdown files.
 import json
 import os
 from pathlib import Path
-from typing import Literal
 
 from fastmcp import FastMCP
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, field_validator
 
 # ---------------------------------------------------------------------------
 # Server setup
@@ -22,7 +21,7 @@ mcp = FastMCP("stardew_mcp")
 
 REFERENCES_DIR = Path(__file__).parent / "references"
 
-# Registry maps filename stem -> description (mirrors SKILL.md index)
+# Registry maps filename stem -> description for the discovery tool.
 FILE_REGISTRY: dict[str, str] = {
     "crops": (
         "All farmable crops — grow times, seasons, sell prices, regrow behavior, "
@@ -96,32 +95,6 @@ FILE_REGISTRY: dict[str, str] = {
     ),
 }
 
-FileKey = Literal[
-    "crops",
-    "seasons",
-    "fruit_trees",
-    "artisan_goods",
-    "cooking",
-    "crafting",
-    "fish",
-    "mines",
-    "tools",
-    "villagers",
-    "gifts",
-    "bundles",
-    "museum",
-    "farmhouse",
-    "achievements",
-    "animals",
-    "foraging",
-    "skills",
-]
-
-
-# ---------------------------------------------------------------------------
-# Input models
-# ---------------------------------------------------------------------------
-
 
 class FetchFileInput(BaseModel):
     """Input model for fetching a Stardew Valley reference file."""
@@ -132,13 +105,24 @@ class FetchFileInput(BaseModel):
         extra="forbid",
     )
 
-    file: FileKey = Field(
+    file: str = Field(
         ...,
         description=(
-            "The reference file to fetch. Use stardew_list_files to see all "
-            "available options with descriptions."
+            "The reference file key to fetch. Call stardew_list_files first "
+            "to discover the available files and descriptions."
         ),
     )
+
+    @field_validator("file")
+    @classmethod
+    def validate_file(cls, value: str) -> str:
+        normalized = value.lower()
+        if normalized not in FILE_REGISTRY:
+            raise ValueError(
+                "Unknown reference file. Call stardew_list_files first to "
+                "discover valid file keys."
+            )
+        return normalized
 
 
 # ---------------------------------------------------------------------------
@@ -193,32 +177,27 @@ async def stardew_fetch_file(params: FetchFileInput) -> str:
     """Fetch the full contents of a Stardew Valley reference file.
 
     Returns exact game data (item names, sell prices, gift preferences, grow
-    times, bundle requirements, etc.) from the bundled markdown reference file.
-    Always prefer fetching the relevant file over relying on memory — the files
-    contain precise, up-to-date data.
+    times, bundle requirements, etc.) from a bundled markdown reference file.
+    Use stardew_list_files first to find the best file for the question, then
+    pass the chosen file key here.
 
     Args:
         params (FetchFileInput):
-            - file (str): The reference file key (e.g. "crops", "fish").
+            - file (str): The exact reference file key.
               Use stardew_list_files to see all valid keys.
 
     Returns:
         str: Full markdown content of the requested reference file.
-             Returns an error string if the file cannot be read.
 
-    Examples:
-        - "What crops can I grow in summer?" -> fetch "crops", then "seasons"
-        - "What does Abigail love?" -> fetch "villagers" or "gifts"
-        - "How do I make wine?" -> fetch "artisan_goods"
-        - "What's in the Crafts Room bundle?" -> fetch "bundles"
     """
     path = REFERENCES_DIR / f"{params.file}.md"
+    if not path.is_file():
+        raise FileNotFoundError(f"Bundled reference file is missing: {params.file}.md")
+
     try:
         return path.read_text(encoding="utf-8")
-    except FileNotFoundError:
-        return f"Error: Reference file '{params.file}.md' not found on disk."
-    except OSError as e:
-        return f"Error: Could not read '{params.file}.md': {e}"
+    except OSError as exc:
+        raise RuntimeError(f"Could not read '{params.file}.md': {exc}") from exc
 
 
 # ---------------------------------------------------------------------------
@@ -226,5 +205,6 @@ async def stardew_fetch_file(params: FetchFileInput) -> str:
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
+    host = os.environ.get("HOST", "0.0.0.0")
     port = int(os.environ.get("PORT", 8000))
-    mcp.run(transport="streamable-http", host="127.0.0.1", port=port)
+    mcp.run(transport="streamable-http", host=host, port=port)

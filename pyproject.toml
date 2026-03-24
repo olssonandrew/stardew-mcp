@@ -1,7 +1,8 @@
 [project]
 name = "stardew-mcp"
 version = "0.1.0"
-description = "Add your description here"
+description = "A small FastMCP demo server for Stardew Valley reference lookups"
+readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "fastmcp>=2.0.0",
