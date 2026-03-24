@@ -11,7 +11,7 @@ import os
 from pathlib import Path
 from typing import Literal
 
-from mcp.server.fastmcp import FastMCP
+from fastmcp import FastMCP
 from pydantic import BaseModel, Field, ConfigDict
 
 # ---------------------------------------------------------------------------
@@ -82,18 +82,46 @@ FILE_REGISTRY: dict[str, str] = {
     "achievements": (
         "All in-game achievements — requirements and rewards (hats, titles)"
     ),
+    "animals": (
+        "Farm animals and pets — buildings required (coop, barn), animal products, "
+        "friendship/happiness mechanics, Marnie's shop, incubator hatching, pigs/truffles"
+    ),
+    "foraging": (
+        "Foraging skill — wild resources by season and location, quality mechanics, "
+        "Botanist/Tracker professions, Wild Seeds, salmonberry and blackberry seasons"
+    ),
+    "skills": (
+        "All five skills (Farming, Mining, Foraging, Fishing, Combat) — XP thresholds, "
+        "level-up rewards, profession choices at levels 5 and 10, tool proficiency bonuses"
+    ),
 }
 
 FileKey = Literal[
-    "crops", "seasons", "fruit_trees", "artisan_goods", "cooking", "crafting",
-    "fish", "mines", "tools", "villagers", "gifts", "bundles", "museum",
-    "farmhouse", "achievements",
+    "crops",
+    "seasons",
+    "fruit_trees",
+    "artisan_goods",
+    "cooking",
+    "crafting",
+    "fish",
+    "mines",
+    "tools",
+    "villagers",
+    "gifts",
+    "bundles",
+    "museum",
+    "farmhouse",
+    "achievements",
+    "animals",
+    "foraging",
+    "skills",
 ]
 
 
 # ---------------------------------------------------------------------------
 # Input models
 # ---------------------------------------------------------------------------
+
 
 class FetchFileInput(BaseModel):
     """Input model for fetching a Stardew Valley reference file."""
@@ -116,6 +144,7 @@ class FetchFileInput(BaseModel):
 # ---------------------------------------------------------------------------
 # Tools
 # ---------------------------------------------------------------------------
+
 
 @mcp.tool(
     name="stardew_list_files",
@@ -145,8 +174,7 @@ async def stardew_list_files() -> str:
         ]
     """
     entries = [
-        {"file": key, "description": desc}
-        for key, desc in FILE_REGISTRY.items()
+        {"file": key, "description": desc} for key, desc in FILE_REGISTRY.items()
     ]
     return json.dumps(entries, indent=2)
 
@@ -199,4 +227,4 @@ async def stardew_fetch_file(params: FetchFileInput) -> str:
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
-    mcp.run(transport="streamable-http", host="0.0.0.0", port=port)
+    mcp.run(transport="streamable-http", host="127.0.0.1", port=port)
