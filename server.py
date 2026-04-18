@@ -2,15 +2,19 @@
 """
 Stardew Valley MCP Server
 
-Provides two tools for looking up Stardew Valley game reference data
-from bundled markdown files.
+Provides tools for looking up Stardew Valley game reference data from
+bundled markdown files, plus live search and fetch against the official
+Stardew Valley wiki (https://stardewvalleywiki.com, CC BY-NC-SA 3.0).
 """
 
 import json
 import os
+import re
 from pathlib import Path
 
+import httpx
 from fastmcp import FastMCP
+from html_to_markdown import convert
 
 # ---------------------------------------------------------------------------
 # Server setup
@@ -19,6 +23,12 @@ from fastmcp import FastMCP
 mcp = FastMCP("stardew_mcp")
 
 REFERENCES_DIR = Path(__file__).parent / "references"
+
+WIKI_API = "https://stardewvalleywiki.com/mediawiki/api.php"
+USER_AGENT = (
+    "StardewMCP/1.0 (educational demo; contact: github.com/your-handle/stardew-mcp)"
+)
+HTTP_TIMEOUT = 20.0
 
 # Registry maps filename stem -> description for the discovery tool.
 FILE_REGISTRY: dict[str, str] = {
@@ -95,8 +105,17 @@ FILE_REGISTRY: dict[str, str] = {
 }
 
 
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
+
+
+def html_to_markdown(html: str, title: str) -> str:
+    """Convert wiki HTML to markdown and prepend a title heading."""
+    markdown = convert(html).content.strip()
+    return f"# {title}\n\n{markdown}" if markdown else f"# {title}"
+
+
 # ---------------------------------------------------------------------------
-# Tools
+# Bundled reference tools
 # ---------------------------------------------------------------------------
 
 
@@ -173,6 +192,124 @@ async def stardew_fetch_file(file: str) -> str:
         return path.read_text(encoding="utf-8")
     except OSError as exc:
         raise RuntimeError(f"Could not read '{file}.md': {exc}") from exc
+
+
+# ---------------------------------------------------------------------------
+# Live wiki tools
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool(
+    name="stardew_search_wiki",
+    annotations={
+        "title": "Search the Stardew Valley Wiki",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": True,
+    },
+)
+async def stardew_search_wiki(query: str, limit: int = 5) -> str:
+    """Search the official Stardew Valley wiki for pages matching a query.
+
+    Use this when the bundled reference files don't cover something — new
+    patches, obscure lore, edge cases, or anything added after these files
+    were packaged. Returns matching page titles with short text snippets.
+    Pass a title to stardew_fetch_wiki_page to read the full page.
+
+    Args:
+        query (str): Free-text search query (e.g. "ginger island", "stardrop").
+        limit (int): Maximum results to return (default 5, max 20).
+
+    Returns:
+        str: JSON array of {"title": str, "snippet": str} objects.
+    """
+    limit = max(1, min(int(limit), 20))
+    params = {
+        "action": "query",
+        "list": "search",
+        "srsearch": query,
+        "srlimit": limit,
+        "srprop": "snippet",
+        "format": "json",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+            resp = await client.get(
+                WIKI_API, params=params, headers={"User-Agent": USER_AGENT}
+            )
+            resp.raise_for_status()
+            data = resp.json()
+    except httpx.HTTPError as exc:
+        raise RuntimeError(f"Wiki search request failed: {exc}") from exc
+
+    if "error" in data:
+        code = data["error"].get("code", "error")
+        info = data["error"].get("info", "Unknown error")
+        raise RuntimeError(f"Wiki search error ({code}): {info}")
+
+    results = []
+    for hit in data.get("query", {}).get("search", []):
+        raw_snippet = hit.get("snippet", "")
+        clean_snippet = " ".join(_HTML_TAG_RE.sub("", raw_snippet).split())
+        results.append({"title": hit["title"], "snippet": clean_snippet})
+
+    return json.dumps(results, indent=2)
+
+
+@mcp.tool(
+    name="stardew_fetch_wiki_page",
+    annotations={
+        "title": "Fetch a Stardew Valley Wiki Page",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": True,
+    },
+)
+async def stardew_fetch_wiki_page(title: str) -> str:
+    """Fetch the full text of a Stardew Valley wiki page by title.
+
+    Returns the live contents of the page, converted to clean markdown.
+    Follows redirects automatically. Use stardew_search_wiki first if you're
+    not sure of the exact title.
+
+    Args:
+        title (str): The exact wiki page title (e.g. "Parsnip", "Abigail",
+            "Ginger Island").
+
+    Returns:
+        str: Markdown content of the page, prefixed with the resolved title.
+    """
+    params = {
+        "action": "parse",
+        "page": title,
+        "prop": "text",
+        "redirects": 1,
+        "format": "json",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+            resp = await client.get(
+                WIKI_API, params=params, headers={"User-Agent": USER_AGENT}
+            )
+            resp.raise_for_status()
+            data = resp.json()
+    except httpx.HTTPError as exc:
+        raise RuntimeError(f"Wiki page request failed: {exc}") from exc
+
+    if "error" in data:
+        code = data["error"].get("code", "error")
+        info = data["error"].get("info", "Unknown error")
+        raise ValueError(f"Wiki fetch failed ({code}): {info}")
+
+    parse = data.get("parse", {})
+    html = parse.get("text", {}).get("*", "")
+    if not html:
+        raise ValueError(f"No content returned for page: {title}")
+
+    resolved_title = parse.get("title", title)
+    return html_to_markdown(html, resolved_title)
 
 
 # ---------------------------------------------------------------------------
